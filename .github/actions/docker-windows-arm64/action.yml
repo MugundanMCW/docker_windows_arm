@@ -34,8 +34,16 @@ runs:
       shell: powershell
       run: |
         $dockerBin = "C:\Program Files\Docker\Docker\resources\bin"
+        # Add to current process PATH
+        $env:PATH = "$dockerBin;$env:PATH"
+        # Persist PATH for future steps
         echo "PATH=$dockerBin;$env:PATH" >> $env:GITHUB_ENV
+    
+    - name: Verify Docker
+      shell: powershell
+      run: |
         docker --version
+
 
     # Step 4: Wait for Docker to start
     - name: Wait for Docker to be ready
