@@ -1,5 +1,5 @@
 name: "Docker Windows ARM64 Installer"
-description: "Installs Docker Desktop on Windows ARM64 runners and optionally logs in"
+description: "Installs Docker Desktop on Windows ARM64 runners and ensures Docker is ready"
 inputs:
   username:
     description: "Docker registry username"
@@ -11,11 +11,12 @@ inputs:
     description: "Docker registry (default: ghcr.io)"
     required: false
     default: "ghcr.io"
+
 runs:
   using: "composite"
   steps:
 
-    # Step 1: Download Docker Desktop installer
+    # Step 1: Download Docker Desktop installer for ARM64
     - name: Download Docker Desktop ARM64
       shell: powershell
       run: |
@@ -28,11 +29,12 @@ runs:
       run: |
         Start-Process -Wait -FilePath ".\Docker Desktop Installer.exe" -ArgumentList "--quiet"
 
-    # Step 3: Add Docker to PATH (if not already)
-    - name: Ensure Docker in PATH
+    # Step 3: Add Docker to PATH for the rest of the workflow
+    - name: Add Docker to PATH
       shell: powershell
       run: |
-        $env:Path += ";C:\Program Files\Docker\Docker\resources\bin"
+        $dockerBin = "C:\Program Files\Docker\Docker\resources\bin"
+        echo "PATH=$dockerBin;$env:PATH" >> $env:GITHUB_ENV
         docker --version
 
     # Step 4: Wait for Docker to start
@@ -52,5 +54,13 @@ runs:
                 $time += $interval
             }
         }
-        if ($time -ge $maxWait) { throw "Docker did not start in time." }
+        if ($time -ge $maxWait) { 
+            throw "Docker did not start in time."
+        }
 
+    # Step 5 (Optional): Log in to a registry if credentials provided
+    - name: Docker Login (Optional)
+      if: ${{ inputs.username && inputs.password }}
+      shell: powershell
+      run: |
+        docker login ${{ inputs.registry }} -u ${{ inputs.username }} -p ${{ inputs.password }}
