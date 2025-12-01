@@ -1,0 +1,56 @@
+name: "Docker Windows ARM64 Installer"
+description: "Installs Docker Desktop on Windows ARM64 runners and optionally logs in"
+inputs:
+  username:
+    description: "Docker registry username"
+    required: false
+  password:
+    description: "Docker registry password"
+    required: false
+  registry:
+    description: "Docker registry (default: ghcr.io)"
+    required: false
+    default: "ghcr.io"
+runs:
+  using: "composite"
+  steps:
+
+    # Step 1: Download Docker Desktop installer
+    - name: Download Docker Desktop ARM64
+      shell: powershell
+      run: |
+        $installer = "Docker Desktop Installer.exe"
+        Invoke-WebRequest -Uri "https://desktop.docker.com/win/main/arm64/Docker%20Desktop%20Installer.exe?utm_source=docker&utm_medium=webreferral&utm_campaign=docs-driven-download-win-arm64" -OutFile $installer
+
+    # Step 2: Install Docker silently
+    - name: Install Docker Desktop
+      shell: powershell
+      run: |
+        Start-Process -Wait -FilePath ".\Docker Desktop Installer.exe" -ArgumentList "--quiet"
+
+    # Step 3: Add Docker to PATH (if not already)
+    - name: Ensure Docker in PATH
+      shell: powershell
+      run: |
+        $env:Path += ";C:\Program Files\Docker\Docker\resources\bin"
+        docker --version
+
+    # Step 4: Wait for Docker to start
+    - name: Wait for Docker to be ready
+      shell: powershell
+      run: |
+        $maxWait = 300
+        $interval = 5
+        $time = 0
+        while ($time -lt $maxWait) {
+            try {
+                docker info | Out-Null
+                Write-Host "Docker is ready."
+                break
+            } catch {
+                Start-Sleep -Seconds $interval
+                $time += $interval
+            }
+        }
+        if ($time -ge $maxWait) { throw "Docker did not start in time." }
+
