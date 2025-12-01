@@ -37,7 +37,7 @@ runs:
       run: |
         Write-Host "Starting Docker Desktop..."
         Start-Process "C:\Program Files\Docker\Docker\Docker Desktop.exe"
-        Write-Host "Docker Desktop started."
+        Write-Host "Docker Desktop process started."
     
     # Step 4: Add Docker to PATH
     - name: Add Docker to PATH
@@ -71,42 +71,82 @@ runs:
         
         Write-Host "Docker added to PATH"
     
-    # Step 5: Wait for Docker to be ready
-    - name: Wait for Docker to be ready
+    # Step 5: Wait for Docker daemon to be fully ready
+    - name: Wait for Docker daemon to be ready
       shell: powershell
       run: |
-        Write-Host "Waiting for Docker daemon to be ready..."
-        $maxWait = 300
-        $interval = 5
+        Write-Host "Waiting for Docker daemon to be fully ready..."
+        $maxWait = 600  # Increased to 10 minutes for ARM64
+        $interval = 10
         $elapsed = 0
+        $lastError = ""
         
         while ($elapsed -lt $maxWait) {
           try {
-            docker version | Out-Null
-            Write-Host "Docker is ready!"
-            docker version
-            break
+            # Test actual daemon connectivity with docker info
+            $output = docker info 2>&1
+            if ($LASTEXITCODE -eq 0) {
+              Write-Host "Docker daemon is ready!"
+              break
+            } else {
+              $lastError = $output
+              throw "Docker info failed"
+            }
           } catch {
-            Write-Host "Waiting for Docker... ($elapsed/$maxWait seconds)"
+            $lastError = $_.Exception.Message
+            Write-Host "Waiting for Docker daemon... ($elapsed/$maxWait seconds)"
+            
+            # Show helpful status every 30 seconds
+            if ($elapsed % 30 -eq 0 -and $elapsed -gt 0) {
+              Write-Host "  Status: $lastError"
+              
+              # Check if Docker Desktop process is running
+              $dockerProcess = Get-Process "Docker Desktop" -ErrorAction SilentlyContinue
+              if ($dockerProcess) {
+                Write-Host "  Docker Desktop process is running (PID: $($dockerProcess.Id))"
+              } else {
+                Write-Host "  WARNING: Docker Desktop process not found!"
+              }
+            }
+            
             Start-Sleep -Seconds $interval
             $elapsed += $interval
           }
         }
         
-        if ($elapsed -ge $maxWait) { 
-          Write-Host "Docker logs:"
-          Get-Content "C:\ProgramData\Docker\service.txt" -ErrorAction SilentlyContinue
-          throw "Docker did not start within $maxWait seconds."
+        if ($elapsed -ge $maxWait) {
+          Write-Host "`n=== DIAGNOSTIC INFORMATION ==="
+          Write-Host "Last error: $lastError"
+          
+          Write-Host "`n--- Docker processes ---"
+          Get-Process | Where-Object {$_.ProcessName -like "*docker*"} | Format-Table -AutoSize
+          
+          Write-Host "`n--- Docker service logs (if available) ---"
+          if (Test-Path "C:\ProgramData\Docker\service.txt") {
+            Get-Content "C:\ProgramData\Docker\service.txt" -Tail 50
+          }
+          
+          Write-Host "`n--- Docker Desktop logs (if available) ---"
+          $logPath = "$env:LOCALAPPDATA\Docker\log.txt"
+          if (Test-Path $logPath) {
+            Get-Content $logPath -Tail 50
+          }
+          
+          throw "Docker daemon did not start within $maxWait seconds."
         }
     
     # Step 6: Verify Docker
     - name: Verify Docker Installation
       shell: powershell
       run: |
-        Write-Host "Docker version:"
+        Write-Host "`n=== Docker Version ==="
         docker --version
-        Write-Host "`nDocker info:"
+        
+        Write-Host "`n=== Docker Info ==="
         docker info
+        
+        Write-Host "`n=== Docker Context ==="
+        docker context ls
     
     # Step 7 (Optional): Log in to a registry if credentials provided
     - name: Docker Login (Optional)
