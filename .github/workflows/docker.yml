@@ -1,0 +1,22 @@
+name: 🚀 Release
+
+on:
+  push:
+    branches: main
+
+jobs:
+  build:
+    runs-on: windows-11-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Docker
+        uses: ./.github/actions/docker-windows-arm64
+        with:
+          username: ${{ secrets.GHCR_USERNAME }}
+          password: ${{ secrets.GHCR_TOKEN }}
+          registry: ghcr.io
+
+      - name: Verify Docker
+        shell: powershell
+        run: docker version
