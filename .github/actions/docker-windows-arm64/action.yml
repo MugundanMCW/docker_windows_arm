@@ -11,64 +11,108 @@ inputs:
     description: "Docker registry (default: ghcr.io)"
     required: false
     default: "ghcr.io"
-
 runs:
   using: "composite"
   steps:
-
     # Step 1: Download Docker Desktop installer for ARM64
     - name: Download Docker Desktop ARM64
       shell: powershell
       run: |
         $installer = "Docker Desktop Installer.exe"
+        Write-Host "Downloading Docker Desktop for ARM64..."
         Invoke-WebRequest -Uri "https://desktop.docker.com/win/main/arm64/Docker%20Desktop%20Installer.exe?utm_source=docker&utm_medium=webreferral&utm_campaign=docs-driven-download-win-arm64" -OutFile $installer
-
+        Write-Host "Download complete."
+    
     # Step 2: Install Docker silently
     - name: Install Docker Desktop
       shell: powershell
       run: |
-        Start-Process -Wait -FilePath ".\Docker Desktop Installer.exe" -ArgumentList "--quiet"
-
-    # Step 3: Add Docker to PATH for the rest of the workflow
+        Write-Host "Installing Docker Desktop..."
+        Start-Process -Wait -FilePath ".\Docker Desktop Installer.exe" -ArgumentList "install", "--quiet", "--accept-license"
+        Write-Host "Installation complete."
+    
+    # Step 3: Start Docker Desktop
+    - name: Start Docker Desktop
+      shell: powershell
+      run: |
+        Write-Host "Starting Docker Desktop..."
+        Start-Process "C:\Program Files\Docker\Docker\Docker Desktop.exe"
+        Write-Host "Docker Desktop started."
+    
+    # Step 4: Add Docker to PATH
     - name: Add Docker to PATH
       shell: powershell
       run: |
-        $dockerBin = "C:\Program Files\Docker\Docker\resources\bin"
-        # Add to current process PATH
+        # Try multiple possible Docker binary locations
+        $possiblePaths = @(
+          "C:\Program Files\Docker\Docker\resources\bin",
+          "C:\Program Files\Docker\Docker\Resources\bin",
+          "C:\ProgramData\DockerDesktop\version-bin"
+        )
+        
+        $dockerBin = $null
+        foreach ($path in $possiblePaths) {
+          if (Test-Path $path) {
+            $dockerBin = $path
+            Write-Host "Found Docker binaries at: $dockerBin"
+            break
+          }
+        }
+        
+        if (-not $dockerBin) {
+          throw "Docker binaries not found in any expected location"
+        }
+        
+        # Add to PATH using proper GitHub Actions syntax
+        echo "$dockerBin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        
+        # Also add to current session
         $env:PATH = "$dockerBin;$env:PATH"
-        # Persist PATH for future steps
-        echo "PATH=$dockerBin;$env:PATH" >> $env:GITHUB_ENV
+        
+        Write-Host "Docker added to PATH"
     
-    - name: Verify Docker
-      shell: powershell
-      run: |
-        docker --version
-
-
-    # Step 4: Wait for Docker to start
+    # Step 5: Wait for Docker to be ready
     - name: Wait for Docker to be ready
       shell: powershell
       run: |
+        Write-Host "Waiting for Docker daemon to be ready..."
         $maxWait = 300
         $interval = 5
-        $time = 0
-        while ($time -lt $maxWait) {
-            try {
-                docker info | Out-Null
-                Write-Host "Docker is ready."
-                break
-            } catch {
-                Start-Sleep -Seconds $interval
-                $time += $interval
-            }
+        $elapsed = 0
+        
+        while ($elapsed -lt $maxWait) {
+          try {
+            docker version | Out-Null
+            Write-Host "Docker is ready!"
+            docker version
+            break
+          } catch {
+            Write-Host "Waiting for Docker... ($elapsed/$maxWait seconds)"
+            Start-Sleep -Seconds $interval
+            $elapsed += $interval
+          }
         }
-        if ($time -ge $maxWait) { 
-            throw "Docker did not start in time."
+        
+        if ($elapsed -ge $maxWait) { 
+          Write-Host "Docker logs:"
+          Get-Content "C:\ProgramData\Docker\service.txt" -ErrorAction SilentlyContinue
+          throw "Docker did not start within $maxWait seconds."
         }
-
-    # Step 5 (Optional): Log in to a registry if credentials provided
-    - name: Docker Login (Optional)
-      if: ${{ inputs.username && inputs.password }}
+    
+    # Step 6: Verify Docker
+    - name: Verify Docker Installation
       shell: powershell
       run: |
-        docker login ${{ inputs.registry }} -u ${{ inputs.username }} -p ${{ inputs.password }}
+        Write-Host "Docker version:"
+        docker --version
+        Write-Host "`nDocker info:"
+        docker info
+    
+    # Step 7 (Optional): Log in to a registry if credentials provided
+    - name: Docker Login (Optional)
+      if: ${{ inputs.username != '' && inputs.password != '' }}
+      shell: powershell
+      run: |
+        Write-Host "Logging in to ${{ inputs.registry }}..."
+        echo "${{ inputs.password }}" | docker login ${{ inputs.registry }} -u "${{ inputs.username }}" --password-stdin
+        Write-Host "Login successful."
